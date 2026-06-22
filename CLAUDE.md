@@ -20,13 +20,13 @@ Key SDKs/libraries (`go.mod`):
 | Dependency | Role |
 |---|---|
 | `github.com/modelcontextprotocol/go-sdk` | MCP protocol |
-| `github.com/google/go-github/v79` | GitHub REST client |
+| `github.com/google/go-github/v87` | GitHub REST client |
 | `github.com/shurcooL/githubv4` | GitHub GraphQL client |
 | `github.com/spf13/cobra` + `viper` | CLI flags + env var binding |
 | `github.com/google/jsonschema-go` | Tool input schemas |
 | `github.com/stretchr/testify` | Assertions + mocks |
 
-Go version: **1.24+** (toolchain in `go.mod`).
+Go version: **1.25+** (toolchain in `go.mod`).
 
 ## Repository layout
 
@@ -79,7 +79,7 @@ script/                   # test, lint, generate-docs, tag-release, etc.
 | `GITHUB_PERSONAL_ACCESS_TOKEN=… go run ./cmd/github-mcp-server stdio` | Run locally |
 | `script/test` (= `go test -race ./...`) | Unit tests |
 | `UPDATE_TOOLSNAPS=true go test ./...` | Refresh tool-schema snapshots |
-| `script/lint` | gofmt + golangci-lint v2.5.0 (auto-downloaded into `bin/`) |
+| `script/lint` | gofmt + golangci-lint v2.9.0 (auto-downloaded into `bin/`) |
 | `script/generate-docs` | Regenerate `README.md` toolset tables |
 | `GITHUB_MCP_SERVER_E2E_TOKEN=… go test -v --tags e2e ./e2e` | End-to-end (builds Docker image, hits real GitHub API) |
 | `script/tag-release vX.Y.Z` | Cut a release tag (CI publishes via goreleaser) |
@@ -235,7 +235,7 @@ the canonical English text; the key enables override via env var
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `go.yml` | push/PR | `script/test` on Linux/macOS/Windows, `go mod tidy -diff` |
-| `lint.yml` | push/PR | golangci-lint v2.5 |
+| `lint.yml` | push/PR | golangci-lint v2.9 |
 | `mcp-diff.yml` | PR | Diffs MCP tool schemas against base branch (toolsets matrix) |
 | `goreleaser.yml` | tag `v*` | Cross-platform release, provenance attestations |
 | `docker-publish.yml` | release | Push image |
