@@ -2,10 +2,24 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
+
+	"github.com/google/jsonschema-go/jsonschema"
 )
+
+var (
+	// ErrUnknownTools is returned when tools specified via WithTools() are not recognized.
+	ErrUnknownTools = errors.New("unknown tools specified in WithTools")
+)
+
+// mcpAppsFeatureFlag is the feature flag name that controls MCP Apps UI metadata.
+// This is defined here to avoid importing pkg/github (which imports pkg/inventory).
+// The value must match github.MCPAppsFeatureFlag.
+const mcpAppsFeatureFlag = "remote_mcp_ui_apps"
 
 // ToolFilter is a function that determines if a tool should be included.
 // Returns true if the tool should be included, false to exclude it.
@@ -72,9 +86,7 @@ func (b *Builder) SetPrompts(prompts []ServerPrompt) *Builder {
 // WithDeprecatedAliases adds deprecated tool name aliases that map to canonical names.
 // Returns self for chaining.
 func (b *Builder) WithDeprecatedAliases(aliases map[string]string) *Builder {
-	for oldName, newName := range aliases {
-		b.deprecatedAliases[oldName] = newName
-	}
+	maps.Copy(b.deprecatedAliases, aliases)
 	return b
 }
 
@@ -96,8 +108,7 @@ func (b *Builder) WithServerInstructions() *Builder {
 //   - "default": expands to toolsets marked with Default: true in their metadata
 //
 // Input strings are trimmed of whitespace and duplicates are removed.
-// Pass nil to use default toolsets. Pass an empty slice to disable all toolsets
-// (useful for dynamic toolsets mode where tools are enabled on demand).
+// Pass nil to use default toolsets. Pass an empty slice to disable all toolsets.
 // Returns self for chaining.
 func (b *Builder) WithToolsets(toolsetIDs []string) *Builder {
 	b.toolsetIDs = toolsetIDs
@@ -118,8 +129,20 @@ func (b *Builder) WithTools(toolNames []string) *Builder {
 
 // WithFeatureChecker sets the feature flag checker function.
 // The checker receives a context (for actor extraction) and feature flag name,
-// returns (enabled, error). If error occurs, it will be logged and treated as false.
-// If checker is nil, all feature flag checks return false.
+// and returns (enabled, error). Errors are logged and treated as "not enabled".
+//
+// When the checker is non-nil, Build() installs a feature-flag ToolFilter
+// at the head of the filter pipeline so that tools annotated with
+// FeatureFlagEnable / FeatureFlagDisable are gated accordingly. Resources
+// and prompts use the same checker via an explicit guard at their iteration
+// site.
+//
+// When the checker is nil, no feature-flag filter is installed; tools,
+// resources, and prompts pass through feature-flag gating unchanged. The
+// per-request inventory in HTTP mode must always install a checker so that
+// MCP registration (which can only serve a given tool name once) sees a
+// deduplicated set of dual-name variants.
+//
 // Returns self for chaining.
 func (b *Builder) WithFeatureChecker(checker FeatureFlagChecker) *Builder {
 	b.featureChecker = checker
@@ -133,6 +156,33 @@ func (b *Builder) WithFeatureChecker(checker FeatureFlagChecker) *Builder {
 func (b *Builder) WithFilter(filter ToolFilter) *Builder {
 	b.filters = append(b.filters, filter)
 	return b
+}
+
+// WithExcludeTools specifies tools that should be disabled regardless of other settings.
+// These tools will be excluded even if their toolset is enabled or they are in the
+// additional tools list. This takes precedence over all other tool enablement settings.
+// Input is cleaned (trimmed, deduplicated) before applying.
+// Returns self for chaining.
+func (b *Builder) WithExcludeTools(toolNames []string) *Builder {
+	cleaned := cleanTools(toolNames)
+	if len(cleaned) > 0 {
+		b.filters = append(b.filters, CreateExcludeToolsFilter(cleaned))
+	}
+	return b
+}
+
+// CreateExcludeToolsFilter creates a ToolFilter that excludes tools by name.
+// Any tool whose name appears in the excluded list will be filtered out.
+// The input slice should already be cleaned (trimmed, deduplicated).
+func CreateExcludeToolsFilter(excluded []string) ToolFilter {
+	set := make(map[string]struct{}, len(excluded))
+	for _, name := range excluded {
+		set[name] = struct{}{}
+	}
+	return func(_ context.Context, tool *ServerTool) (bool, error) {
+		_, blocked := set[tool.Tool.Name]
+		return !blocked, nil
+	}
 }
 
 // cleanTools trims whitespace and removes duplicates from tool names.
@@ -162,23 +212,35 @@ func cleanTools(tools []string) []string {
 // (i.e., they don't exist in the tool set and are not deprecated aliases).
 // This ensures invalid tool configurations fail fast at build time.
 func (b *Builder) Build() (*Inventory, error) {
+	tools := b.tools
+
+	// Install the feature-flag filter at the head of the pipeline so that
+	// flag-gated tools are excluded before any user-supplied WithFilter sees
+	// them. Doing this in Build() (rather than inside WithFeatureChecker)
+	// keeps the install idempotent — repeated WithFeatureChecker calls
+	// replace the checker without stacking duplicate filters.
+	filters := b.filters
+	if b.featureChecker != nil {
+		filters = append([]ToolFilter{createFeatureFlagFilter(b.featureChecker)}, filters...)
+	}
+
 	r := &Inventory{
-		tools:             b.tools,
+		tools:             tools,
 		resourceTemplates: b.resourceTemplates,
 		prompts:           b.prompts,
 		deprecatedAliases: b.deprecatedAliases,
 		readOnly:          b.readOnly,
 		featureChecker:    b.featureChecker,
-		filters:           b.filters,
+		filters:           filters,
 	}
 
 	// Process toolsets and pre-compute metadata in a single pass
 	r.enabledToolsets, r.unrecognizedToolsets, r.toolsetIDs, r.toolsetIDSet, r.defaultToolsetIDs, r.toolsetDescriptions = b.processToolsets()
 
 	// Build set of valid tool names for validation
-	validToolNames := make(map[string]bool, len(b.tools))
-	for i := range b.tools {
-		validToolNames[b.tools[i].Tool.Name] = true
+	validToolNames := make(map[string]bool, len(tools))
+	for i := range tools {
+		validToolNames[tools[i].Tool.Name] = true
 	}
 
 	// Process additional tools (clean, resolve aliases, and track unrecognized)
@@ -204,7 +266,7 @@ func (b *Builder) Build() (*Inventory, error) {
 
 		// Error out if there are unrecognized tools
 		if len(unrecognizedTools) > 0 {
-			return nil, fmt.Errorf("unrecognized tools: %s", strings.Join(unrecognizedTools, ", "))
+			return nil, fmt.Errorf("%w: %s", ErrUnknownTools, strings.Join(unrecognizedTools, ", "))
 		}
 	}
 
@@ -264,13 +326,13 @@ func (b *Builder) processToolsets() (map[ToolsetID]bool, []string, []ToolsetID, 
 	for id := range validIDs {
 		allToolsetIDs = append(allToolsetIDs, id)
 	}
-	sort.Slice(allToolsetIDs, func(i, j int) bool { return allToolsetIDs[i] < allToolsetIDs[j] })
+	slices.Sort(allToolsetIDs)
 
 	defaultToolsetIDList := make([]ToolsetID, 0, len(defaultIDs))
 	for id := range defaultIDs {
 		defaultToolsetIDList = append(defaultToolsetIDList, id)
 	}
-	sort.Slice(defaultToolsetIDList, func(i, j int) bool { return defaultToolsetIDList[i] < defaultToolsetIDList[j] })
+	slices.Sort(defaultToolsetIDList)
 
 	toolsetIDs := b.toolsetIDs
 
@@ -325,4 +387,150 @@ func (b *Builder) processToolsets() (map[ToolsetID]bool, []string, []ToolsetID, 
 		enabledToolsets[id] = true
 	}
 	return enabledToolsets, unrecognized, allToolsetIDs, validIDs, defaultToolsetIDList, descriptions
+}
+
+// mcpAppsMetaKeys lists the Meta keys controlled by the remote_mcp_ui_apps feature flag.
+var mcpAppsMetaKeys = []string{
+	"ui", // MCP Apps UI metadata
+}
+
+// stripMCPAppsMetadata removes MCP Apps UI metadata from tools when the
+// remote_mcp_ui_apps feature flag is not enabled.
+func stripMCPAppsMetadata(tools []ServerTool) []ServerTool {
+	result := make([]ServerTool, 0, len(tools))
+	for _, tool := range tools {
+		if stripped := stripMetaKeys(tool, mcpAppsMetaKeys); stripped != nil {
+			result = append(result, *stripped)
+		} else {
+			result = append(result, tool)
+		}
+	}
+	return result
+}
+
+// uiOnlySchemaProperties lists input-schema property names that should only
+// be visible to clients that advertise MCP Apps UI support. They live on the
+// static schema (so toolsnaps and the feature-flag / insiders docs document
+// the full UI-capable surface; the main README renders the stripped
+// non-UI schema) and are stripped per-request when the same gate that hides
+// _meta.ui is true.
+var uiOnlySchemaProperties = []string{
+	"show_ui", // explicit "render the MCP App form" toggle on form-backed write tools
+}
+
+// ConditionalSchemaPropertyDescriptions returns a map of schema property name
+// to a human-readable description of the condition under which the property
+// is visible to clients. The doc generator uses this to annotate conditional
+// parameters so readers can see at a glance which fields are not always
+// available. This is the single source of truth for the conditional-property
+// surface — entries here must correspond to a strip rule in
+// ToolsForRegistration.
+func ConditionalSchemaPropertyDescriptions() map[string]string {
+	const uiOnlyCondition = "visible when remote_mcp_ui_apps is enabled unless the client explicitly indicates it does not support io.modelcontextprotocol/ui"
+	out := make(map[string]string, len(uiOnlySchemaProperties))
+	for _, name := range uiOnlySchemaProperties {
+		out[name] = uiOnlyCondition
+	}
+	return out
+}
+
+// stripUIOnlySchemaProperties removes UI-capability-gated input-schema
+// properties (currently just "show_ui") from each tool's static schema.
+// Tools whose InputSchema is not a *jsonschema.Schema (e.g. json.RawMessage)
+// are passed through untouched — no such tool currently declares a gated
+// property, and inferring intent from an opaque schema is not safe.
+// Tools without any gated property are returned as-is so we only allocate
+// when a change is actually made (mirrors the stripMetaKeys pattern).
+func stripUIOnlySchemaProperties(tools []ServerTool) []ServerTool {
+	result := make([]ServerTool, 0, len(tools))
+	for _, tool := range tools {
+		if stripped := stripSchemaProperties(tool, uiOnlySchemaProperties); stripped != nil {
+			result = append(result, *stripped)
+		} else {
+			result = append(result, tool)
+		}
+	}
+	return result
+}
+
+// stripSchemaProperties removes the named keys from tool.Tool.InputSchema's
+// Properties map (and Required list, if present) and returns a modified copy.
+// Returns nil when the schema is not a *jsonschema.Schema or no listed key
+// is present, signalling no change.
+func stripSchemaProperties(tool ServerTool, keys []string) *ServerTool {
+	if tool.Tool.InputSchema == nil || len(keys) == 0 {
+		return nil
+	}
+	schema, ok := tool.Tool.InputSchema.(*jsonschema.Schema)
+	if !ok || schema == nil || len(schema.Properties) == 0 {
+		return nil
+	}
+
+	hasKey := false
+	for _, key := range keys {
+		if _, exists := schema.Properties[key]; exists {
+			hasKey = true
+			break
+		}
+	}
+	if !hasKey {
+		return nil
+	}
+
+	toolCopy := tool
+	schemaCopy := *schema
+	newProps := make(map[string]*jsonschema.Schema, len(schema.Properties))
+	for k, v := range schema.Properties {
+		if !slices.Contains(keys, k) {
+			newProps[k] = v
+		}
+	}
+	schemaCopy.Properties = newProps
+	if len(schemaCopy.Required) > 0 {
+		newRequired := make([]string, 0, len(schemaCopy.Required))
+		for _, r := range schemaCopy.Required {
+			if !slices.Contains(keys, r) {
+				newRequired = append(newRequired, r)
+			}
+		}
+		schemaCopy.Required = newRequired
+	}
+	toolCopy.Tool.InputSchema = &schemaCopy
+	return &toolCopy
+}
+
+// stripMetaKeys removes the specified Meta keys from a single tool.
+// Returns a modified copy if changes were made, nil otherwise.
+func stripMetaKeys(tool ServerTool, keys []string) *ServerTool {
+	if tool.Tool.Meta == nil || len(keys) == 0 {
+		return nil
+	}
+
+	// Check if any of the specified keys exist
+	hasKeys := false
+	for _, key := range keys {
+		if _, ok := tool.Tool.Meta[key]; ok {
+			hasKeys = true
+			break
+		}
+	}
+	if !hasKeys {
+		return nil
+	}
+
+	// Make a shallow copy and remove specified keys
+	toolCopy := tool
+	newMeta := make(map[string]any, len(tool.Tool.Meta))
+	for k, v := range tool.Tool.Meta {
+		if !slices.Contains(keys, k) {
+			newMeta[k] = v
+		}
+	}
+
+	if len(newMeta) == 0 {
+		toolCopy.Tool.Meta = nil
+	} else {
+		toolCopy.Tool.Meta = newMeta
+	}
+	return &toolCopy
 }

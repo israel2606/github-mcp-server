@@ -8,8 +8,9 @@ import (
 
 	"github.com/github/github-mcp-server/internal/toolsnaps"
 	"github.com/github/github-mcp-server/pkg/translations"
-	"github.com/google/go-github/v79/github"
+	"github.com/google/go-github/v87/github"
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,7 +43,7 @@ func Test_ListGlobalSecurityAdvisories(t *testing.T) {
 	tests := []struct {
 		name               string
 		mockedClient       *http.Client
-		requestArgs        map[string]interface{}
+		requestArgs        map[string]any
 		expectError        bool
 		expectedAdvisories []*github.GlobalSecurityAdvisory
 		expectedErrMsg     string
@@ -52,7 +53,7 @@ func Test_ListGlobalSecurityAdvisories(t *testing.T) {
 			mockedClient: MockHTTPClientWithHandlers(map[string]http.HandlerFunc{
 				GetAdvisories: mockResponse(t, http.StatusOK, []*github.GlobalSecurityAdvisory{mockAdvisory}),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"type":      "reviewed",
 				"ecosystem": "npm",
 				"severity":  "high",
@@ -68,7 +69,7 @@ func Test_ListGlobalSecurityAdvisories(t *testing.T) {
 					_, _ = w.Write([]byte(`{"message": "Bad Request"}`))
 				}),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"type":     "reviewed",
 				"severity": "extreme",
 			},
@@ -83,7 +84,7 @@ func Test_ListGlobalSecurityAdvisories(t *testing.T) {
 					_, _ = w.Write([]byte(`{"message": "Internal Server Error"}`))
 				}),
 			}),
-			requestArgs:    map[string]interface{}{},
+			requestArgs:    map[string]any{},
 			expectError:    true,
 			expectedErrMsg: "failed to list global security advisories",
 		},
@@ -92,7 +93,7 @@ func Test_ListGlobalSecurityAdvisories(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
-			client := github.NewClient(tc.mockedClient)
+			client := mustNewGHClient(t, tc.mockedClient)
 			deps := BaseDeps{Client: client}
 			handler := toolDef.Handler(deps)
 
@@ -155,7 +156,7 @@ func Test_GetGlobalSecurityAdvisory(t *testing.T) {
 	tests := []struct {
 		name             string
 		mockedClient     *http.Client
-		requestArgs      map[string]interface{}
+		requestArgs      map[string]any
 		expectError      bool
 		expectedAdvisory *github.GlobalSecurityAdvisory
 		expectedErrMsg   string
@@ -165,7 +166,7 @@ func Test_GetGlobalSecurityAdvisory(t *testing.T) {
 			mockedClient: MockHTTPClientWithHandlers(map[string]http.HandlerFunc{
 				GetAdvisoriesByGhsaID: mockResponse(t, http.StatusOK, mockAdvisory),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"ghsaId": "GHSA-xxxx-xxxx-xxxx",
 			},
 			expectError:      false,
@@ -179,7 +180,7 @@ func Test_GetGlobalSecurityAdvisory(t *testing.T) {
 					_, _ = w.Write([]byte(`{"message": "Bad Request"}`))
 				}),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"ghsaId": "invalid-ghsa-id",
 			},
 			expectError:    true,
@@ -193,7 +194,7 @@ func Test_GetGlobalSecurityAdvisory(t *testing.T) {
 					_, _ = w.Write([]byte(`{"message": "Not Found"}`))
 				}),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"ghsaId": "GHSA-xxxx-xxxx-xxxx",
 			},
 			expectError:    true,
@@ -204,7 +205,7 @@ func Test_GetGlobalSecurityAdvisory(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
-			client := github.NewClient(tc.mockedClient)
+			client := mustNewGHClient(t, tc.mockedClient)
 			deps := BaseDeps{Client: client}
 			handler := toolDef.Handler(deps)
 
@@ -270,7 +271,7 @@ func Test_ListRepositorySecurityAdvisories(t *testing.T) {
 	tests := []struct {
 		name               string
 		mockedClient       *http.Client
-		requestArgs        map[string]interface{}
+		requestArgs        map[string]any
 		expectError        bool
 		expectedAdvisories []*github.SecurityAdvisory
 		expectedErrMsg     string
@@ -285,7 +286,7 @@ func Test_ListRepositorySecurityAdvisories(t *testing.T) {
 					mockResponse(t, http.StatusOK, []*github.SecurityAdvisory{adv1, adv2}),
 				),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner": "owner",
 				"repo":  "repo",
 			},
@@ -306,7 +307,7 @@ func Test_ListRepositorySecurityAdvisories(t *testing.T) {
 					mockResponse(t, http.StatusOK, []*github.SecurityAdvisory{adv1}),
 				),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner":     "octo",
 				"repo":      "hello-world",
 				"direction": "desc",
@@ -326,7 +327,7 @@ func Test_ListRepositorySecurityAdvisories(t *testing.T) {
 					mockResponse(t, http.StatusInternalServerError, map[string]string{"message": "Internal Server Error"}),
 				),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner": "owner",
 				"repo":  "repo",
 			},
@@ -337,7 +338,7 @@ func Test_ListRepositorySecurityAdvisories(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := github.NewClient(tc.mockedClient)
+			client := mustNewGHClient(t, tc.mockedClient)
 			deps := BaseDeps{Client: client}
 			handler := toolDef.Handler(deps)
 
@@ -368,6 +369,132 @@ func Test_ListRepositorySecurityAdvisories(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_ListRepositorySecurityAdvisories_IFC_FeatureFlag verifies the IFC label
+// attached to list_repository_security_advisories. The label is only present
+// when the ifc_labels feature flag is enabled, and — critically — confidentiality
+// is public only when the repository is public AND every returned advisory is
+// published. Draft/triage/closed advisories are not world-readable even on a
+// public repo, so a result containing one must be labeled private. This guards
+// against the under-classification raised in PR review.
+func Test_ListRepositorySecurityAdvisories_IFC_FeatureFlag(t *testing.T) {
+	t.Parallel()
+
+	toolDef := ListRepositorySecurityAdvisories(translations.NullTranslationHelper)
+
+	publishedAdvisory := &github.SecurityAdvisory{
+		GHSAID:  github.Ptr("GHSA-1111-1111-1111"),
+		Summary: github.Ptr("Published advisory"),
+		State:   github.Ptr("published"),
+	}
+	draftAdvisory := &github.SecurityAdvisory{
+		GHSAID:  github.Ptr("GHSA-2222-2222-2222"),
+		Summary: github.Ptr("Draft advisory"),
+		State:   github.Ptr("draft"),
+	}
+
+	makeMockClient := func(isPrivate bool, advisories []*github.SecurityAdvisory) *http.Client {
+		return MockHTTPClientWithHandlers(map[string]http.HandlerFunc{
+			GetReposSecurityAdvisoriesByOwnerByRepo: mockResponse(t, http.StatusOK, advisories),
+			GetReposByOwnerByRepo: mockResponse(t, http.StatusOK, map[string]any{
+				"name":    "repo",
+				"private": isPrivate,
+			}),
+		})
+	}
+
+	reqParams := map[string]any{
+		"owner": "owner",
+		"repo":  "repo",
+	}
+
+	readIFC := func(t *testing.T, result *mcp.CallToolResult) (map[string]any, bool) {
+		t.Helper()
+		if result.Meta == nil {
+			return nil, false
+		}
+		label, ok := result.Meta["ifc"]
+		if !ok {
+			return nil, false
+		}
+		labelJSON, err := json.Marshal(label)
+		require.NoError(t, err)
+		var labelMap map[string]any
+		require.NoError(t, json.Unmarshal(labelJSON, &labelMap))
+		return labelMap, true
+	}
+
+	t.Run("feature flag disabled omits ifc label", func(t *testing.T) {
+		t.Parallel()
+		deps := BaseDeps{Client: mustNewGHClient(t, makeMockClient(false, []*github.SecurityAdvisory{publishedAdvisory}))}
+		handler := toolDef.Handler(deps)
+
+		request := createMCPRequest(reqParams)
+		result, err := handler(ContextWithDeps(context.Background(), deps), &request)
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		assert.Nil(t, result.Meta, "result meta should be nil when IFC labels are disabled")
+	})
+
+	t.Run("public repo with only published advisories is public", func(t *testing.T) {
+		t.Parallel()
+		deps := BaseDeps{
+			Client:         mustNewGHClient(t, makeMockClient(false, []*github.SecurityAdvisory{publishedAdvisory})),
+			featureChecker: featureCheckerFor(FeatureFlagIFCLabels),
+		}
+		handler := toolDef.Handler(deps)
+
+		request := createMCPRequest(reqParams)
+		result, err := handler(ContextWithDeps(context.Background(), deps), &request)
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		label, ok := readIFC(t, result)
+		require.True(t, ok, "result meta should contain ifc key")
+		assert.Equal(t, "untrusted", label["integrity"])
+		assert.Equal(t, "public", label["confidentiality"])
+	})
+
+	t.Run("public repo with a draft advisory is private", func(t *testing.T) {
+		t.Parallel()
+		// Reviewer scenario: a draft advisory on a public repo is not
+		// world-readable, so the label must not be public.
+		deps := BaseDeps{
+			Client:         mustNewGHClient(t, makeMockClient(false, []*github.SecurityAdvisory{publishedAdvisory, draftAdvisory})),
+			featureChecker: featureCheckerFor(FeatureFlagIFCLabels),
+		}
+		handler := toolDef.Handler(deps)
+
+		request := createMCPRequest(reqParams)
+		result, err := handler(ContextWithDeps(context.Background(), deps), &request)
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		label, ok := readIFC(t, result)
+		require.True(t, ok, "result meta should contain ifc key")
+		assert.Equal(t, "untrusted", label["integrity"])
+		assert.Equal(t, "private", label["confidentiality"], "draft advisory on public repo must be private")
+	})
+
+	t.Run("private repo is private", func(t *testing.T) {
+		t.Parallel()
+		deps := BaseDeps{
+			Client:         mustNewGHClient(t, makeMockClient(true, []*github.SecurityAdvisory{publishedAdvisory})),
+			featureChecker: featureCheckerFor(FeatureFlagIFCLabels),
+		}
+		handler := toolDef.Handler(deps)
+
+		request := createMCPRequest(reqParams)
+		result, err := handler(ContextWithDeps(context.Background(), deps), &request)
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		label, ok := readIFC(t, result)
+		require.True(t, ok, "result meta should contain ifc key")
+		assert.Equal(t, "untrusted", label["integrity"])
+		assert.Equal(t, "private", label["confidentiality"])
+	})
 }
 
 func Test_ListOrgRepositorySecurityAdvisories(t *testing.T) {
@@ -403,7 +530,7 @@ func Test_ListOrgRepositorySecurityAdvisories(t *testing.T) {
 	tests := []struct {
 		name               string
 		mockedClient       *http.Client
-		requestArgs        map[string]interface{}
+		requestArgs        map[string]any
 		expectError        bool
 		expectedAdvisories []*github.SecurityAdvisory
 		expectedErrMsg     string
@@ -418,7 +545,7 @@ func Test_ListOrgRepositorySecurityAdvisories(t *testing.T) {
 					mockResponse(t, http.StatusOK, []*github.SecurityAdvisory{adv1, adv2}),
 				),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"org": "octo",
 			},
 			expectError:        false,
@@ -438,7 +565,7 @@ func Test_ListOrgRepositorySecurityAdvisories(t *testing.T) {
 					mockResponse(t, http.StatusOK, []*github.SecurityAdvisory{adv1}),
 				),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"org":       "octo",
 				"direction": "asc",
 				"sort":      "created",
@@ -457,7 +584,7 @@ func Test_ListOrgRepositorySecurityAdvisories(t *testing.T) {
 					mockResponse(t, http.StatusForbidden, map[string]string{"message": "Forbidden"}),
 				),
 			}),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"org": "octo",
 			},
 			expectError:    true,
@@ -467,7 +594,7 @@ func Test_ListOrgRepositorySecurityAdvisories(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := github.NewClient(tc.mockedClient)
+			client := mustNewGHClient(t, tc.mockedClient)
 			deps := BaseDeps{Client: client}
 			handler := toolDef.Handler(deps)
 
