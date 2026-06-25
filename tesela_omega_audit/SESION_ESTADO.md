@@ -1,9 +1,26 @@
 # TESELA OMEGA — Estado de Sesión / Archivo de Continuación
 
 **Última actualización (UTC):** 2026-06-25  
-**Rama git:** `claude/connector-recommendations-hzwhi4` (repo `israel2606/github-mcp-server`)  
-**Commit de la auditoría:** `253cbc2`  
+**Repo:** `israel2606/github-mcp-server`  
+**Entrega limpia (canónica):** rama `claude/tesela-omega-audit-docs` → **PR #18** (draft, solo-docs, CI verde)  
+**Rama de desarrollo ERP (con todo el código):** `claude/connector-recommendations-hzwhi4` (commit auditoría original `253cbc2`)  
 **Modo de sesión:** Auditoría read-only completada. Reparaciones **pendientes de aprobación explícita del usuario**.
+
+> **Nota de entrega:** la auditoría se entregó en una rama limpia (`claude/tesela-omega-audit-docs`, PR #18) partida desde `main`, porque la rama de desarrollo `claude/connector-recommendations-hzwhi4` tiene un merge Go incoherente preexistente (go.mod en Go 1.24/go-github v79 mientras parte del código importa v87, que requiere Go 1.25) que rompía la CI — ajeno a la auditoría. El PR #17 (que arrastraba esa divergencia) se cerró.
+
+## 🔌 Cómo seguir OFFLINE (sin esta sesión ni GitHub)
+
+Este entorno es **efímero**: se recicla tras inactividad. Para no perder nada:
+
+1. **Copia portátil:** existe un paquete `tesela_omega_audit_OFFLINE.zip` (enviado al usuario) con TODA la auditoría + este archivo de estado. Ábrelo en cualquier visor de Markdown; empieza por `_REPORT/MASTER_REVIEW_SISTEMA.md`.
+2. **Copia en GitHub:** todo está pusheado. Para recuperarlo en una máquina local:
+   ```
+   git clone https://github.com/israel2606/github-mcp-server
+   cd github-mcp-server
+   git checkout claude/tesela-omega-audit-docs     # solo la auditoría (docs)
+   # o:  git checkout claude/connector-recommendations-hzwhi4   # ERP completo
+   ```
+3. **Para retomar con un agente IA en otra sesión:** entrégale este archivo (`SESION_ESTADO.md`) + `_REPORT/MASTER_REVIEW_SISTEMA.md`. Contienen todo el contexto necesario (estado, P0, decisiones, próximos pasos).
 
 ---
 
