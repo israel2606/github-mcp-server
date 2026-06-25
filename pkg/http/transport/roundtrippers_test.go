@@ -22,7 +22,7 @@ func (c *capturingRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 	return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header)}, nil
 }
 
-func newRequest(t *testing.T, ctx context.Context) *http.Request {
+func newRequest(ctx context.Context, t *testing.T) *http.Request {
 	t.Helper()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/", nil)
 	require.NoError(t, err)
@@ -33,9 +33,10 @@ func TestUserAgentTransport_SetsHeaderAndPreservesOriginal(t *testing.T) {
 	capture := &capturingRoundTripper{}
 	tr := &UserAgentTransport{Transport: capture, Agent: "github-mcp-server/test"}
 
-	req := newRequest(t, context.Background())
+	req := newRequest(context.Background(), t)
 	resp, err := tr.RoundTrip(req)
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// The outgoing (cloned) request carries the agent...
@@ -48,8 +49,9 @@ func TestBearerAuthTransport_SetsAuthorization(t *testing.T) {
 	capture := &capturingRoundTripper{}
 	tr := &BearerAuthTransport{Transport: capture, Token: "secret-token"}
 
-	_, err := tr.RoundTrip(newRequest(t, context.Background()))
+	resp, err := tr.RoundTrip(newRequest(context.Background(), t))
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, "Bearer secret-token", capture.got.Header.Get(headers.AuthorizationHeader))
 	// No GraphQL features in context -> header must be absent.
 	require.Empty(t, capture.got.Header.Get(headers.GraphQLFeaturesHeader))
@@ -60,8 +62,9 @@ func TestBearerAuthTransport_AddsGraphQLFeaturesFromContext(t *testing.T) {
 	tr := &BearerAuthTransport{Transport: capture, Token: "tok"}
 
 	ctx := ghcontext.WithGraphQLFeatures(context.Background(), "feature_a", "feature_b")
-	_, err := tr.RoundTrip(newRequest(t, ctx))
+	resp, err := tr.RoundTrip(newRequest(ctx, t))
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, "Bearer tok", capture.got.Header.Get(headers.AuthorizationHeader))
 	require.Equal(t, "feature_a, feature_b", capture.got.Header.Get(headers.GraphQLFeaturesHeader))
 }
