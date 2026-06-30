@@ -34,3 +34,4 @@ pkg/github/ui_dist/*
 !pkg/github/ui_dist/.placeholder.html
 # Paquete offline de la auditoría (artefacto derivable, no versionar)
 tesela_omega_audit_OFFLINE.zip
+.mcp.json
