@@ -22,6 +22,12 @@ bin/
 /e2e.test
 
 .history
+
+# Holded connector — secrets
+.env
+__pycache__/
+*.pyc
+*.egg-info/
 conformance-report/
 
 # UI build artifacts
