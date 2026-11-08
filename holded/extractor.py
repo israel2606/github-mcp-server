@@ -88,23 +88,35 @@ def holded_get(api_key: str, endpoint: str, params: dict = None) -> list:
 
 
 def ping_sociedad(sociedad: str, api_key: str) -> dict:
-    """Verifica conectividad sin cargar datos completos."""
+    """Verifica conectividad con una sola petición (sin paginación)."""
+    headers = {"key": api_key, "Accept": "application/json"}
     try:
-        contacts = holded_get(api_key, ENDPOINTS["contacts"], {"limit": 1, "page": 1})
-        return {"ok": True, "sociedad": sociedad, "sample_count": len(contacts)}
+        r = requests.get(
+            f"{BASE_URL}/{ENDPOINTS['contacts']}",
+            headers=headers,
+            params={"page": 1, "limit": 1},
+            timeout=30,
+        )
+        if r.status_code == 401:
+            raise PermissionError(f"API key inválida para {sociedad}")
+        r.raise_for_status()
+        return {"ok": True, "sociedad": sociedad}
     except PermissionError as e:
         return {"ok": False, "sociedad": sociedad, "error": str(e)}
     except Exception as e:
         return {"ok": False, "sociedad": sociedad, "error": str(e)}
 
 
+_SYNC_ENDPOINTS = {k: ENDPOINTS[k] for k in ("contacts", "invoices", "bills", "projects")}
+
+
 def sync_sociedad(sociedad: str, api_key: str) -> dict:
-    """Extrae todos los endpoints para una sociedad.
+    """Extrae los 4 endpoints persistidos en Supabase para una sociedad.
     Devuelve dict con los datos y clave '_errors' con los endpoints fallidos.
     """
     print(f"\n→ Sincronizando {sociedad}...")
     data: dict = {"_errors": {}}
-    for name, endpoint in ENDPOINTS.items():
+    for name, endpoint in _SYNC_ENDPOINTS.items():
         try:
             records = holded_get(api_key, endpoint)
             data[name] = records
