@@ -79,13 +79,14 @@ CREATE TABLE IF NOT EXISTS holded_projects (
 -- Vista: aging de cobros vencidos
 CREATE OR REPLACE VIEW v_aging_cobros AS
 SELECT sociedad,
+       contact_id,
        contact_nombre,
        SUM(pendiente)         AS total_pendiente,
        MAX(fecha_vencimiento) AS ultimo_vencimiento
 FROM holded_invoices
 WHERE estado IN ('pending', 'partial') AND pendiente > 0
   AND fecha_vencimiento < NOW()
-GROUP BY sociedad, contact_nombre
+GROUP BY sociedad, contact_id, contact_nombre
 ORDER BY total_pendiente DESC;
 
 -- Vista: coste de material por obra (sin IVA, sin mano de obra)
@@ -97,7 +98,7 @@ SELECT b.sociedad,
 FROM holded_bills b
 JOIN holded_projects p
   ON b.project_id = p.holded_id AND b.sociedad = p.sociedad
-WHERE b.estado NOT IN ('cancelled')
+WHERE b.estado IS DISTINCT FROM 'cancelled'
 GROUP BY b.sociedad, p.nombre, p.codigo
 ORDER BY coste_material DESC;
 
@@ -113,11 +114,11 @@ SELECT p.codigo,
 FROM holded_projects p
 LEFT JOIN (
     SELECT project_id, sociedad, SUM(base_imponible) AS total_ventas
-    FROM holded_invoices WHERE estado NOT IN ('cancelled')
+    FROM holded_invoices WHERE estado IS DISTINCT FROM 'cancelled'
     GROUP BY project_id, sociedad
 ) v ON v.project_id = p.holded_id AND v.sociedad = p.sociedad
 LEFT JOIN (
     SELECT project_id, sociedad, SUM(base_imponible) AS coste_material
-    FROM holded_bills WHERE estado NOT IN ('cancelled')
+    FROM holded_bills WHERE estado IS DISTINCT FROM 'cancelled'
     GROUP BY project_id, sociedad
 ) c ON c.project_id = p.holded_id AND c.sociedad = p.sociedad;
