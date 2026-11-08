@@ -1,5 +1,7 @@
 """Carga datos extraídos de Holded en Supabase vía upsert."""
 
+from __future__ import annotations
+
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -96,7 +98,7 @@ def _normalize_project(sociedad: str, row: dict) -> dict:
     }
 
 
-_MADRID = ZoneInfo("Europe/Madrid")
+_MADRID = ZoneInfo("Europe/Madrid")  # requiere tzdata en Windows/Alpine (declarado en setup.py)
 
 # Holded devuelve status como entero en documentos de facturación.
 _HOLDED_STATUS_MAP = {0: "pending", 1: "paid", 2: "partial", 3: "cancelled"}

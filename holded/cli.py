@@ -45,6 +45,9 @@ def cmd_load_supabase(args):
     print("─" * 50)
     all_ok = True
     target = args.sociedad.upper() if args.sociedad else None
+    if target and target not in EMPRESAS:
+        print(f"  ✗ Sociedad desconocida: '{target}'. Opciones: {', '.join(EMPRESAS)}")
+        sys.exit(1)
     for sociedad, key in EMPRESAS.items():
         if target and sociedad != target:
             continue
