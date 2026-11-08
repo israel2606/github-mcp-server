@@ -1,0 +1,26 @@
+"""Instala el comando tesela-erp desde la raíz del repositorio.
+
+Uso:
+    pip install -e .
+    tesela-erp holded-ping
+"""
+
+from setuptools import setup, find_packages
+
+setup(
+    name="tesela-erp",
+    version="0.1.0",
+    packages=find_packages(),
+    install_requires=[
+        "requests>=2.31.0",
+        "supabase>=2.0.0",
+        "python-dotenv>=1.0.0",
+        "tzdata>=2024.1",
+    ],
+    entry_points={
+        "console_scripts": [
+            "tesela-erp=holded.cli:main",
+        ],
+    },
+    python_requires=">=3.9",
+)
