@@ -1,7 +1,8 @@
 """Carga datos extraídos de Holded en Supabase vía upsert."""
 
 import os
-from datetime import date, datetime
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://jpojckqnhepiuwefyvdr.supabase.co")
@@ -37,19 +38,21 @@ def _normalize_contact(sociedad: str, row: dict) -> dict:
 
 
 def _normalize_invoice(sociedad: str, row: dict) -> dict:
+    # Holded puede devolver contactId o contact según la versión del endpoint.
+    # pending o paymentsPending según el tipo de documento.
     return {
         "sociedad":         sociedad,
         "holded_id":        str(row.get("id", "")),
         "numero":           row.get("docNumber") or row.get("number"),
         "fecha":            _ts_to_date(row.get("date")),
         "fecha_vencimiento": _ts_to_date(row.get("dueDate")),
-        "contact_id":       str(row.get("contactId", "")),
+        "contact_id":       str(row.get("contactId") or row.get("contact") or ""),
         "contact_nombre":   row.get("contactName"),
         "base_imponible":   row.get("subtotal"),
         "iva":              row.get("tax"),
         "total":            row.get("total"),
-        "pendiente":        row.get("pending"),
-        "estado":           row.get("status"),
+        "pendiente":        row.get("pending") if row.get("pending") is not None else row.get("paymentsPending"),
+        "estado":           _map_status(row.get("status")),
         "project_id":       str(row.get("projectId", "")) or None,
         "raw_json":         row,
         "synced_at":        _today(),
@@ -63,13 +66,13 @@ def _normalize_bill(sociedad: str, row: dict) -> dict:
         "numero":            row.get("docNumber") or row.get("number"),
         "fecha":             _ts_to_date(row.get("date")),
         "fecha_vencimiento": _ts_to_date(row.get("dueDate")),
-        "proveedor_id":      str(row.get("contactId", "")),
+        "proveedor_id":      str(row.get("contactId") or row.get("contact") or ""),
         "proveedor_nombre":  row.get("contactName"),
         "base_imponible":    row.get("subtotal"),
         "iva":               row.get("tax"),
         "total":             row.get("total"),
-        "pendiente":         row.get("pending"),
-        "estado":            row.get("status"),
+        "pendiente":         row.get("pending") if row.get("pending") is not None else row.get("paymentsPending"),
+        "estado":            _map_status(row.get("status")),
         "project_id":        str(row.get("projectId", "")) or None,
         "cuenta_contable":   row.get("account"),
         "raw_json":          row,
@@ -93,14 +96,27 @@ def _normalize_project(sociedad: str, row: dict) -> dict:
     }
 
 
+_MADRID = ZoneInfo("Europe/Madrid")
+
+# Holded devuelve status como entero en documentos de facturación.
+_HOLDED_STATUS_MAP = {0: "pending", 1: "paid", 2: "partial", 3: "cancelled"}
+
+
 def _ts_to_date(value) -> str | None:
-    """Convierte timestamp Unix a string ISO date, o None."""
+    """Convierte timestamp Unix a string ISO date en zona Europe/Madrid, o None."""
     if not value:
         return None
     try:
-        return date.fromtimestamp(int(value)).isoformat()
+        return datetime.fromtimestamp(int(value), _MADRID).date().isoformat()
     except Exception:
         return None
+
+
+def _map_status(raw) -> str | None:
+    """Normaliza el campo status de Holded (entero o string) a string."""
+    if isinstance(raw, int):
+        return _HOLDED_STATUS_MAP.get(raw)
+    return raw
 
 
 # ---------------------------------------------------------------------------

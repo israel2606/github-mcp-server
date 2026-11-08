@@ -38,6 +38,8 @@ def holded_get(api_key: str, endpoint: str, params: dict = None) -> list:
     headers = {"key": api_key, "Accept": "application/json"}
     results = []
     page = 1
+    rate_limit_retries = 0
+    MAX_RATE_LIMIT_RETRIES = 10
     while True:
         p = {**params, "page": page, "limit": 100}
         try:
@@ -48,8 +50,14 @@ def holded_get(api_key: str, endpoint: str, params: dict = None) -> list:
         if r.status_code == 401:
             raise PermissionError(f"API key inválida para endpoint {endpoint}")
         if r.status_code == 429:
-            print("  ⚠ Rate limit — esperando 60s...")
-            time.sleep(60)
+            rate_limit_retries += 1
+            if rate_limit_retries > MAX_RATE_LIMIT_RETRIES:
+                raise RuntimeError(
+                    f"Rate limit persistente en {endpoint} tras {MAX_RATE_LIMIT_RETRIES} reintentos"
+                )
+            wait = int(r.headers.get("Retry-After", 60))
+            print(f"  ⚠ Rate limit — esperando {wait}s (intento {rate_limit_retries}/{MAX_RATE_LIMIT_RETRIES})...")
+            time.sleep(wait)
             continue
         if r.status_code >= 500:
             # retry x3 con backoff exponencial
@@ -91,9 +99,11 @@ def ping_sociedad(sociedad: str, api_key: str) -> dict:
 
 
 def sync_sociedad(sociedad: str, api_key: str) -> dict:
-    """Extrae todos los endpoints para una sociedad."""
+    """Extrae todos los endpoints para una sociedad.
+    Devuelve dict con los datos y clave '_errors' con los endpoints fallidos.
+    """
     print(f"\n→ Sincronizando {sociedad}...")
-    data = {}
+    data: dict = {"_errors": {}}
     for name, endpoint in ENDPOINTS.items():
         try:
             records = holded_get(api_key, endpoint)
@@ -102,7 +112,9 @@ def sync_sociedad(sociedad: str, api_key: str) -> dict:
         except PermissionError as e:
             print(f"  ✗ {name}: {e}")
             data[name] = []
+            data["_errors"][name] = str(e)
         except Exception as e:
             print(f"  ✗ {name}: {e}")
             data[name] = []
+            data["_errors"][name] = str(e)
     return data
